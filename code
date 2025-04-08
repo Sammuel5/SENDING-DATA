@@ -65,6 +65,11 @@ int currentNtpServer = 0;  // Index of current NTP server
 unsigned long relayStartTime = 0;
 bool relayActive = false;
 
+// Time tracking variables
+String timeInValue = "";  // Store the time-in value
+String timeOutValue = ""; // Store the time-out value
+String dateValue = "";    // Store the date value
+
 // Initial time setup as fallback
 #define INITIAL_YEAR 2025
 #define INITIAL_MONTH 3
@@ -80,6 +85,7 @@ String readQRData();
 void connectToWiFi();
 String getFormattedDate();
 String getFormattedTime();
+String getISOFormattedDate();
 void setupTime();
 void updateTimeFromNTP();
 void updateLCDMessage(const char *line1, const char *line2);
@@ -265,6 +271,11 @@ void loop() {
                 delay(1000);
                 displayMessage("Scan To Lock");
                 
+                // Store time-in value and date
+                timeInValue = getFormattedTime();
+                dateValue = getISOFormattedDate();
+                timeOutValue = "";  // Reset time-out value
+                
                 // Send data to API (Time-In)
                 sendLogToAPI(qrData, true);
             } else {
@@ -277,6 +288,9 @@ void loop() {
                     displayMessage("System Locked");
                     delay(1000);
                     displayMessage("Scan for Time-In");
+                    
+                    // Store time-out value
+                    timeOutValue = getFormattedTime();
                     
                     // Send data to API (Time-Out)
                     sendLogToAPI(qrData, false);
@@ -332,29 +346,32 @@ String getFormattedTime() {
     return String(timeBuffer);
 }
 
-void sendLogToAPI(String qrData, bool isTimeIn) {
-    // Get current date and time at the moment of scanning
-    String formattedDate = getFormattedDate();
-    String formattedTime = getFormattedTime();
-    
+String getISOFormattedDate() {
     // Format date in ISO format for API
     char isoDate[25];
     sprintf(isoDate, "%04d-%02d-%02dT%02d:%02d:%02d.000+00:00", 
             year(), month(), day(), hour(), minute(), second());
+    return String(isoDate);
+}
+
+void sendLogToAPI(String qrData, bool isTimeIn) {
+    // Get current date and time at the moment of scanning if not already stored
+    if (isTimeIn) {
+        // Store the time-in value
+        timeInValue = getFormattedTime();
+        dateValue = getISOFormattedDate();
+        timeOutValue = ""; // Reset time-out value when starting a new session
+    } else {
+        // Store the time-out value
+        timeOutValue = getFormattedTime();
+    }
     
     // Create JSON data to send to the API
     String jsonData = "{";
     jsonData += "\"studentID\": \"" + qrData + "\", ";
-    
-    if (isTimeIn) {
-        jsonData += "\"timeIn\": \"" + formattedTime + "\", ";
-        jsonData += "\"timeOut\": \"\", ";
-    } else {
-        jsonData += "\"timeIn\": \"\", ";
-        jsonData += "\"timeOut\": \"" + formattedTime + "\", ";
-    }
-    
-    jsonData += "\"date\": \"" + String(isoDate) + "\", ";
+    jsonData += "\"timeIn\": \"" + timeInValue + "\", ";
+    jsonData += "\"timeOut\": \"" + timeOutValue + "\", ";
+    jsonData += "\"date\": \"" + dateValue + "\", ";
     jsonData += "\"pcNumber\": 1, ";
     jsonData += "\"password\": \"$2a$15$qA8d5vh8g0fC042HrZqNm..gHu9UuoPAG4QBMY2DCr4GiV69tdbr.\"";
     jsonData += "}";
@@ -393,9 +410,17 @@ void sendLogToAPI(String qrData, bool isTimeIn) {
         u8g2.setFont(u8g2_font_6x10_mr);
         u8g2.drawStr(0, 10, "QR Scanned:");
         u8g2.drawStr(0, 20, qrData.c_str());
-        u8g2.drawStr(0, 30, isTimeIn ? "Time IN:" : "Time OUT:");
-        u8g2.drawStr(0, 40, formattedTime.c_str());
-        u8g2.drawStr(0, 50, formattedDate.c_str());
+        
+        if (isTimeIn) {
+            u8g2.drawStr(0, 30, "Time IN:");
+            u8g2.drawStr(0, 40, timeInValue.c_str());
+        } else {
+            u8g2.drawStr(0, 30, "Time OUT:");
+            u8g2.drawStr(0, 40, timeOutValue.c_str());
+            // Also show Time IN for reference
+            u8g2.drawStr(0, 50, "Time IN:");
+            u8g2.drawStr(0, 60, timeInValue.c_str());
+        }
         u8g2.sendBuffer();
         
         delay(2000);
